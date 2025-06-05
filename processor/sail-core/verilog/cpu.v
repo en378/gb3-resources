@@ -92,6 +92,13 @@ module cpu(
 	wire [154:0]		ex_mem_out;
 	wire [116:0]		mem_wb_out;
 
+	wire enable_pipeline_stage = RegWrite1 | MemWrite1 | MemRead1;
+	reg [177:0] id_ex_out_reg;
+	always @(posedge clk) begin
+		if (enable_pipeline_stage)
+			id_ex_out_reg <= id_ex_out;
+	end
+
 	/*
 	 *	Control signals
 	 */
@@ -120,7 +127,6 @@ module cpu(
 	wire [31:0]		RegB_mux_out;
 	wire [31:0]		RegA_AddrFwdFlush_mux_out;
 	wire [31:0]		RegB_AddrFwdFlush_mux_out;
-	wire [31:0]		rdValOut_CSR;
 	wire [3:0]		dataMem_sign_mask;
 
 	/*
@@ -139,7 +145,6 @@ module cpu(
 	 *	Memory access stage
 	 */
 	wire [31:0]		auipc_mux_out;
-	wire [31:0]		mem_csrr_mux_out;
 
 	/*
 	 *	Writeback to registers stage
@@ -270,14 +275,6 @@ module cpu(
 			.sign_mask(dataMem_sign_mask)
 		);
 
-	csr_file ControlAndStatus_registers(
-			.clk(clk),
-			.write(mem_wb_out[3]), //TODO
-			.wrAddr_CSR(mem_wb_out[116:105]),
-			.wrVal_CSR(mem_wb_out[35:4]),
-			.rdAddr_CSR(inst_mux_out[31:20]),
-			.rdVal_CSR(rdValOut_CSR)
-		);
 
 	mux2to1 RegA_mux(
 			.input0(regA_out),
@@ -288,7 +285,7 @@ module cpu(
 
 	mux2to1 RegB_mux(
 			.input0(regB_out),
-			.input1(rdValOut_CSR),
+			.input1(32'b0),
 			.select(CSRR_signal),
 			.out(RegB_mux_out)
 		);
@@ -358,6 +355,7 @@ module cpu(
 			.select(id_ex_out[9]),
 			.out(lui_result)
 		);
+	
 
 	//EX/MEM Pipeline Register
 	ex_mem ex_mem_reg(
@@ -384,17 +382,11 @@ module cpu(
 			.out(auipc_mux_out)
 		);
 
-	mux2to1 mem_csrr_mux(
-			.input0(auipc_mux_out),
-			.input1(ex_mem_out[137:106]),
-			.select(ex_mem_out[3]),
-			.out(mem_csrr_mux_out)
-		);
-
+	
 	//MEM/WB Pipeline Register
 	mem_wb mem_wb_reg(
 			.clk(clk),
-			.data_in({ex_mem_out[154:143], ex_mem_out[142:138], data_mem_out, mem_csrr_mux_out, ex_mem_out[105:74], ex_mem_out[3:0]}),
+			.data_in({ex_mem_out[154:143], ex_mem_out[142:138], data_mem_out, 0, ex_mem_out[105:74], ex_mem_out[3:0]}),
 			.data_out(mem_wb_out)
 		);
 
@@ -496,7 +488,7 @@ module cpu(
 	wire[31:0] mem_regwb_mux_out; //TODO copy of wb_mux but in mem stage, move back and cleanup
 	//A copy of the writeback mux, but in MEM stage //TODO move back and cleanup
 	mux2to1 mem_regwb_mux(
-			.input0(mem_csrr_mux_out),
+			.input0(32'b0),
 			.input1(data_mem_out),
 			.select(ex_mem_out[1]),
 			.out(mem_regwb_mux_out)
