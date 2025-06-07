@@ -38,19 +38,19 @@
 /*
  *	top.v
  *
- *	Top level entity, linking cpu with data and instruction memory.
+ *	Top‐level entity, linking cpu with data and instruction memory
+ *  plus integrating GShare predictor and branch decision logic.
  */
 
 module top (led);
 	output [7:0]	led;
 
-	wire		clk_proc;
-	wire		data_clk_stall;
-	
-	wire		clk;
-	reg		ENCLKHF		= 1'b1;	// Plock enable
-	reg		CLKHF_POWERUP	= 1'b1;	// Power up the HFOSC circuit
+    wire        clk_proc;
+    wire        data_clk_stall;
 
+    wire        clk;
+    reg         ENCLKHF      = 1'b1;	// Plock enable
+    reg         CLKHF_POWERUP= 1'b1;	// Power up HFOSC
 
 	/*
 	 *	Use the iCE40's hard primitive for the clock source.
@@ -73,23 +73,49 @@ module top (led);
 	wire		data_memread;
 	wire[3:0]	data_sign_mask;
 
+    /*
+     *	Branch predictor & decision interface
+     */
+    wire        branch_decode_sig;
+    wire [31:0] branch_pc_decode;
+    wire [31:0] branch_offset;
+    wire        branch_mem_sig;
+    wire        actual_branch_decision;
+    wire [31:0] branch_target;
+    wire        predictor_pred;
+    reg         pred_r_delay;
 
-	cpu processor(
-		.clk(clk_proc),
-		.inst_mem_in(inst_in),
-		.inst_mem_out(inst_out),
-		.data_mem_out(data_out),
-		.data_mem_addr(data_addr),
-		.data_mem_WrData(data_WrData),
-		.data_mem_memwrite(data_memwrite),
-		.data_mem_memread(data_memread),
-		.data_mem_sign_mask(data_sign_mask)
-	);
+    /*
+     *	CPU core instantiation
+     */
+    cpu processor(
+        .clk                    (clk_proc),
+        .inst_mem_in            (inst_in),
+        .inst_mem_out           (inst_out),
+        .data_mem_out           (data_out),
+        .data_mem_addr          (data_addr),
+        .data_mem_WrData        (data_WrData),
+        .data_mem_memwrite      (data_memwrite),
+        .data_mem_memread       (data_memread),
+        .data_mem_sign_mask     (data_sign_mask),
 
-	instruction_memory inst_mem( 
-		.addr(inst_in), 
-		.out(inst_out)
-	);
+        // Branch ports
+        .branch_decode_sig      (branch_decode_sig),
+        .branch_pc_decode       (branch_pc_decode),
+        .branch_offset          (branch_offset),
+        .branch_mem_sig         (branch_mem_sig),
+        .actual_branch_decision (actual_branch_decision),
+        .branch_predicted       (predictor_pred),
+        .branch_target          (branch_target)
+    );
+
+    /*
+     *	Instruction memory
+     */
+    instruction_memory inst_mem(
+        .addr (inst_in),
+        .out  (inst_out)
+    );
 
 	data_mem data_mem_inst(
 			.clk(clk),
@@ -103,5 +129,52 @@ module top (led);
 			.clk_stall(data_clk_stall)
 		);
 
-	assign clk_proc = (data_clk_stall) ? 1'b1 : clk;
+    /*
+     *	Stall CPU clock if data memory asserts clk_stall:
+     */
+    assign clk_proc = (data_clk_stall) ? 1'b1 : clk;
+
+    /*
+     *	Register predictor_pred so branch_decision sees it aligned with Decode
+     */
+    always @(posedge clk) begin
+        if (data_clk_stall) begin
+            pred_r_delay <= 1'b0;
+        end else begin
+            pred_r_delay <= predictor_pred;
+        end
+    end
+
+    /*
+     *	GShare predictor instance
+     */
+    branch_predictor predictor(
+        .clk                    (clk),
+        .actual_branch_decision (actual_branch_decision),
+        .branch_decode_sig      (branch_decode_sig),
+        .branch_mem_sig         (branch_mem_sig),
+        .in_addr                (branch_pc_decode),
+        .offset                 (branch_offset),
+        .branch_addr            (branch_target),
+        .prediction             (predictor_pred)
+    );
+
+    /*
+     *	2‐stage branch decision logic
+     */
+    wire Decision_out;
+    wire Mispredict_out;
+    wire Branch_Jump_Trigger_out;
+
+    branch_decision bdec(
+        .clk                 (clk),
+        .Branch              (actual_branch_decision),
+        .Predicted           (pred_r_delay),
+        .Branch_Enable       (branch_mem_sig),
+        .Jump                (1'b0),                
+        .Decision            (Decision_out),
+        .Mispredict          (Mispredict_out),
+        .Branch_Jump_Trigger (Branch_Jump_Trigger_out)
+    );
+
 endmodule
