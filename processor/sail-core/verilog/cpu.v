@@ -43,54 +43,76 @@
 
 
 module cpu(
-			clk,
-			inst_mem_in,
-			inst_mem_out,
-			data_mem_out,
-			data_mem_addr,
-			data_mem_WrData,
-			data_mem_memwrite,
-			data_mem_memread,
-			data_mem_sign_mask
-		);
-	/*
-	 *	Input Clock
-	 */
-	input clk;
+            clk,
+            inst_mem_in,
+            inst_mem_out,
+            data_mem_out,
+            data_mem_addr,
+            data_mem_WrData,
+            data_mem_memwrite,
+            data_mem_memread,
+            data_mem_sign_mask,
+            branch_decode_sig,
+            branch_pc_decode,
+            branch_offset,
+            branch_mem_sig,
+            actual_branch_decision,
+            branch_predicted,
+            branch_target
+        );
+    /*
+     *	Input Clock
+     */
+    input clk;
 
-	/*
-	 *	instruction memory input
-	 */
-	output [31:0]		inst_mem_in;
-	input [31:0]		inst_mem_out;
+    /*
+     *	instruction memory interface
+     */
+    output [31:0] inst_mem_in;
+    input  [31:0] inst_mem_out;
 
-	/*
-	 *	Data Memory
-	 */
-	input [31:0]		data_mem_out;
-	output [31:0]		data_mem_addr;
-	output [31:0]		data_mem_WrData;
-	output			data_mem_memwrite;
-	output			data_mem_memread;
-	output [3:0]		data_mem_sign_mask;
+    /*
+     *	Data Memory interface
+     */
+    input  [31:0] data_mem_out;
+    output [31:0] data_mem_addr;
+    output [31:0] data_mem_WrData;
+    output        data_mem_memwrite;
+    output        data_mem_memread;
+    output [ 3:0] data_mem_sign_mask;
 
-	/*
-	 *	Program Counter
-	 */
-	wire [31:0]		pc_mux0;
-	wire [31:0]		pc_in;
-	wire [31:0]		pc_out;
-	wire			pcsrc;
-	wire [31:0]		inst_mux_out;
-	wire [31:0]		fence_mux_out;
+    /*
+     *	BRANCH PREDICTOR / DECISION Ports
+     */
+    output        branch_decode_sig;
+    output [31:0] branch_pc_decode;
+    output [31:0] branch_offset;
+    output        branch_mem_sig;
+    output        actual_branch_decision;
+    input         branch_predicted;
+    input  [31:0] branch_target;
 
-	/*
-	 *	Pipeline Registers
-	 */
-	wire [63:0]		if_id_out;
-	wire [177:0]		id_ex_out;
-	wire [154:0]		ex_mem_out;
-	wire [116:0]		mem_wb_out;
+
+    /*
+     *	Program Counter
+     */
+    wire [31:0]     pc_mux0;
+    wire [31:0]     pc_in;
+    wire [31:0]     pc_out;
+    wire            pcsrc;
+    wire [31:0]     inst_mux_out;
+    wire [31:0]     fence_mux_out;
+    wire [31:0]     pc_adder_out;
+
+
+    /*
+     *	Pipeline Registers
+     */
+    wire [63:0]     if_id_out;
+    wire [177:0]        id_ex_out;
+    wire [154:0]        ex_mem_out;
+    wire [116:0]        mem_wb_out;
+
 
 	/*
 	 *	Control signals
@@ -147,30 +169,34 @@ module cpu(
 	wire [31:0]		wb_mux_out;
 	wire [31:0]		reg_dat_mux_out;
 
-	/*
-	 *	Forwarding multiplexer wires
-	 */
-	wire [31:0]		dataMemOut_fwd_mux_out;
-	wire [31:0]		mem_fwd1_mux_out;
-	wire [31:0]		mem_fwd2_mux_out;
-	wire [31:0]		wb_fwd1_mux_out;
-	wire [31:0]		wb_fwd2_mux_out;
-	wire			mfwd1;
-	wire			mfwd2;
-	wire			wfwd1;
-	wire			wfwd2;
+    /*
+     *	Forwarding multiplexer wires
+     */
+    wire [31:0]     dataMemOut_fwd_mux_out;
+    wire [31:0]     branch_predictor_mux_out;  
+    wire [31:0]     mem_fwd1_mux_out;
+    wire [31:0]     mem_fwd2_mux_out;
+    wire [31:0]     wb_fwd1_mux_out;
+    wire [31:0]     wb_fwd2_mux_out;
+    wire            mfwd1;
+    wire            mfwd2;
+    wire            wfwd1;
+    wire            wfwd2;
 
-	/*
-	 *	Branch Predictor
-	 */
-	wire [31:0]		pc_adder_out;
-	wire [31:0]		branch_predictor_addr;
-	wire			predict;
-	wire [31:0]		branch_predictor_mux_out;
-	wire			actual_branch_decision;
-	wire			mistake_trigger;
-	wire			decode_ctrl_mux_sel;
-	wire			inst_mux_sel;
+
+    /*
+     *	BRANCH‐DECISION INTERFACE WIRES
+     */
+    wire mistake_trigger;
+    wire pcsrc;
+
+
+    /*
+     *	SELECT‐LINES FOR FLUSH/STALL CONTROL
+     */
+    wire decode_ctrl_mux_sel;
+    wire inst_mux_sel;
+
 
 	/*
 	 *	Instruction Fetch Stage
@@ -309,12 +335,24 @@ module cpu(
 
 	assign CSRRI_signal = CSRR_signal & (if_id_out[46]);
 
-	//ID/EX Pipeline Register
-	id_ex id_ex_reg(
-			.clk(clk),
-			.data_in({if_id_out[63:52], RegB_AddrFwdFlush_mux_out[4:0], RegA_AddrFwdFlush_mux_out[4:0], if_id_out[43:39], dataMem_sign_mask, alu_ctl, imm_out, RegB_mux_out, RegA_mux_out, if_id_out[31:0], cont_mux_out[10:7], predict, cont_mux_out[6:0]}),
-			.data_out(id_ex_out)
-		);
+    // ID/EX pipeline register
+    id_ex id_ex_reg(
+        .clk(clk),
+        .data_in({if_id_out[63:52],
+                  RegB_AddrFwdFlush_mux_out[4:0],
+                  RegA_AddrFwdFlush_mux_out[4:0],
+                  if_id_out[43:39],
+                  dataMem_sign_mask,
+                  alu_ctl,
+                  imm_out,
+                  RegB_mux_out,
+                  RegA_mux_out,
+                  if_id_out[31:0],
+                  cont_mux_out[10:7],
+                  cont_mux_out[6],    // old Branch1
+                  cont_mux_out[5:0]}),
+        .data_out(id_ex_out)
+    );
 
 	//Execute stage
 	mux2to1 ex_cont_mux(
@@ -359,30 +397,39 @@ module cpu(
 			.out(lui_result)
 		);
 
-	//EX/MEM Pipeline Register
-	ex_mem ex_mem_reg(
-			.clk(clk),
-			.data_in({id_ex_out[177:166], id_ex_out[155:151], wb_fwd2_mux_out, lui_result, alu_branch_enable, addr_adder_sum, id_ex_out[43:12], ex_cont_mux_out[8:0]}),
-			.data_out(ex_mem_out)
-		);
+    // EX/MEM pipeline register
+    ex_mem ex_mem_reg(
+        .clk(clk),
+        .data_in({id_ex_out[177:166],
+                  id_ex_out[155:151],
+                  wb_fwd2_mux_out,
+                  lui_result,
+                  alu_branch_enable,   // now ex_mem_out[6]
+                  addr_adder_sum,
+                  id_ex_out[43:12],
+                  ex_cont_mux_out[8:0]}),
+        .data_out(ex_mem_out)
+    );
 
-	//Memory Access Stage
-	branch_decision branch_decide(
-			.Branch(ex_mem_out[6]),
-			.Predicted(ex_mem_out[7]),
-			.Branch_Enable(ex_mem_out[73]),
-			.Jump(ex_mem_out[0]),
-			.Mispredict(mistake_trigger),
-			.Decision(actual_branch_decision),
-			.Branch_Jump_Trigger(pcsrc)
-		);
+    // branch decision
+    branch_decision branch_decide(
+        .clk(clk),
+        .Branch(ex_mem_out[6]),
+        .Predicted(ex_mem_out[7]),
+        .Branch_Enable(ex_mem_out[6]),
+        .Jump(ex_mem_out[0]),
+        .Mispredict(mistake_trigger),
+        .Decision(actual_branch_decision),
+        .Branch_Jump_Trigger(pcsrc)
+    );
 
-	mux2to1 auipc_mux(
-			.input0(ex_mem_out[105:74]),
-			.input1(ex_mem_out[72:41]),
-			.select(ex_mem_out[8]),
-			.out(auipc_mux_out)
-		);
+    // Memory Access Stage
+    mux2to1 auipc_mux(
+        .input0(ex_mem_out[105:74]),
+        .input1(ex_mem_out[72:41]),
+        .select(ex_mem_out[8]),
+        .out(auipc_mux_out)
+    );
 
 	mux2to1 mem_csrr_mux(
 			.input0(auipc_mux_out),
@@ -391,12 +438,17 @@ module cpu(
 			.out(mem_csrr_mux_out)
 		);
 
-	//MEM/WB Pipeline Register
-	mem_wb mem_wb_reg(
-			.clk(clk),
-			.data_in({ex_mem_out[154:143], ex_mem_out[142:138], data_mem_out, mem_csrr_mux_out, ex_mem_out[105:74], ex_mem_out[3:0]}),
-			.data_out(mem_wb_out)
-		);
+    // MEM/WB pipeline register
+    mem_wb mem_wb_reg(
+        .clk(clk),
+        .data_in({ex_mem_out[154:143],
+                  ex_mem_out[142:138],
+                  data_mem_out,
+                  mem_csrr_mux_out,
+                  ex_mem_out[105:74],
+                  ex_mem_out[3:0]}),
+        .data_out(mem_wb_out)
+    );
 
 	//Writeback to Register Stage
 	mux2to1 wb_mux(
@@ -431,7 +483,8 @@ module cpu(
 			.WB_fwd1(wfwd1),
 			.WB_fwd2(wfwd2)
 		);
-
+        
+    //fwd mux...
 	mux2to1 mem_fwd1_mux(
 			.input0(id_ex_out[75:44]),
 			.input1(dataMemOut_fwd_mux_out),
@@ -467,52 +520,46 @@ module cpu(
 			.out(dataMemOut_fwd_mux_out)
 		);
 
-	//Branch Predictor
-	branch_predictor branch_predictor_FSM(
-			.clk(clk),
-			.actual_branch_decision(actual_branch_decision),
-			.branch_decode_sig(cont_mux_out[6]),
-			.branch_mem_sig(ex_mem_out[6]),
-			.in_addr(if_id_out[31:0]),
-			.offset(imm_out),
-			.branch_addr(branch_predictor_addr),
-			.prediction(predict)
-		);
+    // Branch predictor + muxes
+    mux2to1 branch_predictor_mux(
+        .input0(fence_mux_out),
+        .input1(branch_target),
+        .select(branch_predicted),
+        .out(branch_predictor_mux_out)
+    );
+    mux2to1 mistaken_branch_mux(
+        .input0(branch_predictor_mux_out),
+        .input1(id_ex_out[43:12]),
+        .select(mistake_trigger),
+        .out(pc_mux0)
+    );
 
-	mux2to1 branch_predictor_mux(
-			.input0(fence_mux_out),
-			.input1(branch_predictor_addr),
-			.select(predict),
-			.out(branch_predictor_mux_out)
-		);
+    wire [31:0] mem_regwb_mux_out;
+    mux2to1 mem_regwb_mux(
+        .input0(mem_csrr_mux_out),
+        .input1(data_mem_out),
+        .select(ex_mem_out[1]),
+        .out(mem_regwb_mux_out)
+    );
 
-	mux2to1 mistaken_branch_mux(
-			.input0(branch_predictor_mux_out),
-			.input1(id_ex_out[43:12]),
-			.select(mistake_trigger),
-			.out(pc_mux0)
-		);
+    //OR gate assignments, used for flushing
+    assign decode_ctrl_mux_sel = pcsrc | mistake_trigger;
+    assign inst_mux_sel        = pcsrc | branch_predicted | mistake_trigger | Fence_signal;
 
-	wire[31:0] mem_regwb_mux_out; //TODO copy of wb_mux but in mem stage, move back and cleanup
-	//A copy of the writeback mux, but in MEM stage //TODO move back and cleanup
-	mux2to1 mem_regwb_mux(
-			.input0(mem_csrr_mux_out),
-			.input1(data_mem_out),
-			.select(ex_mem_out[1]),
-			.out(mem_regwb_mux_out)
-		);
+    // final port drives
+    assign branch_decode_sig    = cont_mux_out[6];
+    assign branch_pc_decode     = if_id_out[31:0];
+    assign branch_offset        = imm_out;
+    assign branch_mem_sig       = ex_mem_out[6];
 
-	//OR gate assignments, used for flushing
-	assign decode_ctrl_mux_sel = pcsrc | mistake_trigger;
-	assign inst_mux_sel = pcsrc | predict | mistake_trigger | Fence_signal;
+    //Instruction Memory Connections
+    assign inst_mem_in          = pc_out;
 
-	//Instruction Memory Connections
-	assign inst_mem_in = pc_out;
+    //Data Memory Connections
+    assign data_mem_addr        = lui_result;
+    assign data_mem_WrData      = wb_fwd2_mux_out;
+    assign data_mem_memwrite    = ex_cont_mux_out[4];
+    assign data_mem_memread     = ex_cont_mux_out[5];
+    assign data_mem_sign_mask   = id_ex_out[150:147];
 
-	//Data Memory Connections
-	assign data_mem_addr = lui_result;
-	assign data_mem_WrData = wb_fwd2_mux_out;
-	assign data_mem_memwrite = ex_cont_mux_out[4];
-	assign data_mem_memread = ex_cont_mux_out[5];
-	assign data_mem_sign_mask = id_ex_out[150:147];
 endmodule
