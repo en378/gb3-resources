@@ -40,7 +40,18 @@
  *	cpu top-level
  */
 
+module clock_gate (
+    input clk,
+    input enable,
+    output gated_clk
+);
+    assign gated_clk = clk & enable;
+endmodule
 
+
+/* 
+ *clock gating module
+ */
 
 module cpu(
 			clk,
@@ -84,6 +95,33 @@ module cpu(
 	wire [31:0]		inst_mux_out;
 	wire [31:0]		fence_mux_out;
 
+	/* 
+	*Gated clocks for all pipeline stages
+	*/
+
+	wire gated_clk_if_id, gated_clk_id_ex, gated_clk_ex_mem, gated_clk_mem_wb;
+
+	clock_gate cg_if_id (
+		.clk(clk),
+		.enable(enable_pipeline_stage),
+		.gated_clk(gated_clk_if_id)
+	);
+	clock_gate cg_id_ex (
+		.clk(clk),
+		.enable(enable_pipeline_stage),
+		.gated_clk(gated_clk_id_ex)
+	);
+	clock_gate cg_ex_mem (
+		.clk(clk),
+		.enable(enable_pipeline_stage),
+		.gated_clk(gated_clk_ex_mem)
+	);
+	clock_gate cg_mem_wb (
+		.clk(clk),
+		.enable(enable_pipeline_stage),
+		.gated_clk(gated_clk_mem_wb)
+	);
+
 	/*
 	 *	Pipeline Registers
 	 */
@@ -95,8 +133,21 @@ module cpu(
 	wire enable_pipeline_stage = RegWrite1 | MemWrite1 | MemRead1;
 	reg [177:0] id_ex_out_reg;
 	always @(posedge clk) begin
-		if (enable_pipeline_stage)
-			id_ex_out_reg <= id_ex_out;
+		id_ex_out_reg <= id_ex_out;
+	end
+
+	always @(posedge gated_clk_if_id) begin
+		if_id_out <= if_id_out; // Replace with actual pipeline input
+	end
+
+	// EX/MEM pipeline register
+	always @(posedge gated_clk_ex_mem) begin
+		ex_mem_out <= ex_mem_out; // Replace with actual input
+	end
+
+	// MEM/WB pipeline register
+	always @(posedge gated_clk_mem_wb) begin
+		mem_wb_out <= mem_wb_out; // Replace with actual input
 	end
 
 	/*
