@@ -33,13 +33,6 @@
 	ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 	POSSIBILITY OF SUCH DAMAGE.
 */
-
-
-
-/*
- *	cpu top-level
- */
-
 module clock_gate (
     input clk,
     input enable,
@@ -49,9 +42,10 @@ module clock_gate (
 endmodule
 
 
-/* 
- *clock gating module
+/*
+ *	cpu top-level
  */
+
 
 module cpu(
 			clk,
@@ -99,33 +93,39 @@ module cpu(
 	*Gated clocks for all pipeline stages
 	*/
 
-	wire gated_clk_if_id, gated_clk_id_ex, gated_clk_ex_mem, gated_clk_mem_wb;
+	wire enable_if_id = ~(pcsrc | mistake_trigger | Fence_signal);
+    wire enable_id_ex = ~(pcsrc | mistake_trigger);
+    wire enable_ex_mem = ex_mem_out[2] | ex_mem_out[4] | ex_mem_out[5]; // RegWrite, MemWrite, MemRead
+    wire enable_mem_wb = mem_wb_out[2]; // RegWrite
 
-	clock_gate cg_if_id (
-		.clk(clk),
-		.enable(enable_pipeline_stage),
-		.gated_clk(gated_clk_if_id)
-	);
-	clock_gate cg_id_ex (
-		.clk(clk),
-		.enable(enable_pipeline_stage),
-		.gated_clk(gated_clk_id_ex)
-	);
-	clock_gate cg_ex_mem (
-		.clk(clk),
-		.enable(enable_pipeline_stage),
-		.gated_clk(gated_clk_ex_mem)
-	);
-	clock_gate cg_mem_wb (
-		.clk(clk),
-		.enable(enable_pipeline_stage),
-		.gated_clk(gated_clk_mem_wb)
-	);
+    clock_gate cg_if_id (
+        .clk(clk),
+        .enable(enable_if_id & enable_pipeline_stage),
+        .gated_clk(gated_clk_if_id)
+    );
+    
+    clock_gate cg_id_ex (
+        .clk(clk),
+        .enable(enable_id_ex & enable_pipeline_stage),
+        .gated_clk(gated_clk_id_ex)
+    );
+    
+    clock_gate cg_ex_mem (
+        .clk(clk),
+        .enable(enable_ex_mem & enable_pipeline_stage),
+        .gated_clk(gated_clk_ex_mem)
+    );
+    
+    clock_gate cg_mem_wb (
+        .clk(clk),
+        .enable(enable_mem_wb & enable_pipeline_stage),
+        .gated_clk(gated_clk_mem_wb)
+    );
 
 	/*
 	 *	Pipeline Registers
 	 */
-	wire [63:0]		if_id_out;
+	wire [63:0]			if_id_out;
 	wire [177:0]		id_ex_out;
 	wire [154:0]		ex_mem_out;
 	wire [116:0]		mem_wb_out;
@@ -164,8 +164,6 @@ module cpu(
 	wire			Lui1;
 	wire			Auipc1;
 	wire			Fence_signal;
-	wire			CSRR_signal;
-	wire			CSRRI_signal;
 
 	/*
 	 *	Decode stage
@@ -288,12 +286,11 @@ module cpu(
 			.Jalr(Jalr1),
 			.Lui(Lui1),
 			.Auipc(Auipc1),
-			.Fence(Fence_signal),
-			.CSRR(CSRR_signal)
+			.Fence(Fence_signal)
 		);
 
 	mux2to1 cont_mux(
-			.input0({21'b0, Jalr1, ALUSrc1, Lui1, Auipc1, Branch1, MemRead1, MemWrite1, CSRR_signal, RegWrite1, MemtoReg1, Jump1}),
+			.input0({23'b0, Jalr1, ALUSrc1, Lui1, Auipc1, Branch1, MemRead1, MemWrite1, RegWrite1, MemtoReg1, Jump1}),
 			.input1(32'b0),
 			.select(decode_ctrl_mux_sel),
 			.out(cont_mux_out)
@@ -327,42 +324,34 @@ module cpu(
 		);
 
 
-	mux2to1 RegA_mux(
-			.input0(regA_out),
-			.input1({27'b0, if_id_out[51:47]}),
-			.select(CSRRI_signal),
-			.out(RegA_mux_out)
-		);
+	assign RegA_mux_out = regA_out; 
 
-	mux2to1 RegB_mux(
-			.input0(regB_out),
-			.input1(32'b0),
-			.select(CSRR_signal),
-			.out(RegB_mux_out)
-		);
+	assign RegB_mux_out = regB_out; 
 
-	mux2to1 RegA_AddrFwdFlush_mux( //TODO cleanup
-			.input0({27'b0, if_id_out[51:47]}),
-			.input1(32'b0),
-			.select(CSRRI_signal),
-			.out(RegA_AddrFwdFlush_mux_out)
-		);
+	assign RegA_AddrFwdFlush_mux_out = {27'b0, if_id_out[51:47]};
 
-	mux2to1 RegB_AddrFwdFlush_mux( //TODO cleanup
-			.input0({27'b0, if_id_out[56:52]}),
-			.input1(32'b0),
-			.select(CSRR_signal),
-			.out(RegB_AddrFwdFlush_mux_out)
-		);
-
-	assign CSRRI_signal = CSRR_signal & (if_id_out[46]);
+	assign RegB_AddrFwdFlush_mux_out = {27'b0, if_id_out[56:52]};
 
 	//ID/EX Pipeline Register
 	id_ex id_ex_reg(
-			.clk(clk),
-			.data_in({if_id_out[63:52], RegB_AddrFwdFlush_mux_out[4:0], RegA_AddrFwdFlush_mux_out[4:0], if_id_out[43:39], dataMem_sign_mask, alu_ctl, imm_out, RegB_mux_out, RegA_mux_out, if_id_out[31:0], cont_mux_out[10:7], predict, cont_mux_out[6:0]}),
-			.data_out(id_ex_out)
-		);
+        .clk(clk),
+        .data_in({
+            id_ex_out[177:166],  
+            RegB_AddrFwdFlush_mux_out[4:0], 
+            RegA_AddrFwdFlush_mux_out[4:0], 
+            if_id_out[43:39], 
+            dataMem_sign_mask, 
+            alu_ctl, 
+            imm_out, 
+            RegB_mux_out, 
+            RegA_mux_out, 
+            if_id_out[31:0], 
+            cont_mux_out[10:7], 
+            predict, 
+            cont_mux_out[6:0]
+        }),
+        .data_out(id_ex_out)
+    	);
 
 	//Execute stage
 	mux2to1 ex_cont_mux(
@@ -458,23 +447,17 @@ module cpu(
 
 	//Forwarding Unit
 	ForwardingUnit forwarding_unit(
-			.rs1(id_ex_out[160:156]),
-			.rs2(id_ex_out[165:161]),
-			.MEM_RegWriteAddr(ex_mem_out[142:138]),
-			.WB_RegWriteAddr(mem_wb_out[104:100]),
-			.MEM_RegWrite(ex_mem_out[2]),
-			.WB_RegWrite(mem_wb_out[2]),
-			.EX_CSRR_Addr(id_ex_out[177:166]),
-			.MEM_CSRR_Addr(ex_mem_out[154:143]),
-			.WB_CSRR_Addr(mem_wb_out[116:105]),
-			.MEM_CSRR(ex_mem_out[3]),
-			.WB_CSRR(mem_wb_out[3]),
-			.MEM_fwd1(mfwd1),
-			.MEM_fwd2(mfwd2),
-			.WB_fwd1(wfwd1),
-			.WB_fwd2(wfwd2)
-		);
-
+        .rs1(id_ex_out[160:156]),
+        .rs2(id_ex_out[165:161]),
+        .MEM_RegWriteAddr(ex_mem_out[142:138]),
+        .WB_RegWriteAddr(mem_wb_out[104:100]),
+        .MEM_RegWrite(ex_mem_out[2]),
+        .WB_RegWrite(mem_wb_out[2]),
+        .MEM_fwd1(mfwd1),
+        .MEM_fwd2(mfwd2),
+        .WB_fwd1(wfwd1), 
+        .WB_fwd2(wfwd2)
+    );
 	mux2to1 mem_fwd1_mux(
 			.input0(id_ex_out[75:44]),
 			.input1(dataMemOut_fwd_mux_out),
