@@ -49,17 +49,6 @@ module data_mem (clk, addr, write_data, memwrite, memread, sign_mask, read_data,
 	output [7:0]		led;
 	output reg		clk_stall;	//Sets the clock high
 
-
-	// Bank selection (uses bits [11:10] of address)
-	wire [1:0] bank_select = addr[11:10];  
-
-	// Bank enable signals (only active during read/write)
-	wire [3:0] bank_enable;
-	assign bank_enable[0] = (bank_select == 2'b00) & (memread | memwrite);
-	assign bank_enable[1] = (bank_select == 2'b01) & (memread | memwrite);
-	assign bank_enable[2] = (bank_select == 2'b10) & (memread | memwrite);
-	assign bank_enable[3] = (bank_select == 2'b11) & (memread | memwrite);
-
 	/*
 	 *	led register
 	 */
@@ -114,10 +103,7 @@ module data_mem (clk, addr, write_data, memwrite, memread, sign_mask, read_data,
 	 *
 	 *	(Bad practice: The constant for the size should be a `define).
 	 */
-	reg [31:0] data_block0[0:255]; 
-	reg [31:0] data_block1[0:255];  
-	reg [31:0] data_block2[0:255];  
-	reg [31:0] data_block3[0:255];
+	reg [31:0]		data_block[0:1023];
 
 	/*
 	 *	wire assignments
@@ -235,10 +221,7 @@ module data_mem (clk, addr, write_data, memwrite, memread, sign_mask, read_data,
 	 *	modules in the design.
 	 */
 	initial begin
-		$readmemh("verilog/data.hex", data_block0);
-		$readmemh("verilog/data.hex", data_block1); 
-		$readmemh("verilog/data.hex", data_block2);
-		$readmemh("verilog/data.hex", data_block3);
+		$readmemh("verilog/data.hex", data_block);
 		clk_stall = 0;
 	end
 
@@ -275,12 +258,7 @@ module data_mem (clk, addr, write_data, memwrite, memread, sign_mask, read_data,
 				 *	Subtract out the size of the instruction memory.
 				 *	(Bad practice: The constant should be a `define).
 				 */
-				case (bank_select)
-					2'b00: word_buf <= data_block0[addr_buf[9:2]];
-					2'b01: word_buf <= data_block1[addr_buf[9:2]];
-					2'b10: word_buf <= data_block2[addr_buf[9:2]];
-					2'b11: word_buf <= data_block3[addr_buf[9:2]];
-				endcase
+				word_buf <= data_block[addr_buf_block_addr - 32'h1000];
 				if(memread_buf==1'b1) begin
 					state <= READ;
 				end
@@ -302,12 +280,7 @@ module data_mem (clk, addr, write_data, memwrite, memread, sign_mask, read_data,
 				 *	Subtract out the size of the instruction memory.
 				 *	(Bad practice: The constant should be a `define).
 				 */
-				case (bank_select)
-					2'b00: data_block0[addr_buf[9:2]] <= replacement_word;
-					2'b01: data_block1[addr_buf[9:2]] <= replacement_word;
-					2'b10: data_block2[addr_buf[9:2]] <= replacement_word;
-					2'b11: data_block3[addr_buf[9:2]] <= replacement_word;
-				endcase
+				data_block[addr_buf_block_addr - 32'h1000] <= replacement_word;
 				state <= IDLE;
 			end
 
