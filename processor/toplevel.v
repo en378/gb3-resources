@@ -23,7 +23,15 @@ module top (
     //==================================================
     // Memory interface signals
     //==================================================
-    wire [31:0] inst_in, inst_out;
+    // CPU ↔ I-cache
+    wire [31:0] inst_in;            // PC from CPU
+    wire [31:0] inst_out;           // instruction back to CPU
+    // I-cache ↔ backing ROM
+    wire [31:0] inst_mem_addr;
+    wire [31:0] inst_mem_out;
+    wire        icache_ready;
+
+    // CPU ↔ Data-mem
     wire [31:0] data_out, data_addr, data_WrData;
     wire        data_memwrite, data_memread;
     wire  [3:0] data_sign_mask;
@@ -52,7 +60,7 @@ module top (
     //==================================================
     // CPU instantiation (external predictor ports)
     //==================================================
-    wire clk_proc = data_clk_stall ? 1'b1 : clk;
+    wire clk_proc = (data_clk_stall || ~icache_ready) ? 1'b1 : clk;
 
     cpu u_cpu (
         .clk                    (clk_proc),
@@ -90,11 +98,23 @@ module top (
     );
 
     //==================================================
+    // Instruction cache
+    //==================================================
+    icache u_icache (
+        .clk       (clk),
+        .addr      (inst_in),       // PC from CPU
+        .data_out  (inst_out),      // instruction to CPU
+        .ready     (icache_ready),  // low while refilling
+        .mem_addr  (inst_mem_addr), // drives real ROM
+        .mem_data  (inst_mem_out)   // ROM → cache data
+    );
+
+    //==================================================
     // Instruction memory
     //==================================================
     instruction_memory u_inst_mem (
-        .addr (inst_in),
-        .out  (inst_out)
+    .addr (inst_mem_addr),
+    .out  (inst_mem_out)
     );
 
     //==================================================
