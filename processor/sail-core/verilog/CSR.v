@@ -34,6 +34,13 @@
 	POSSIBILITY OF SUCH DAMAGE.
 */
 
+/*
+ *	Description:
+ *
+ *		This module implements a resource-optimized (minimal)
+ * Control and Status Register (CSR) file. It returns 0 for all reads
+ * and ignores all writes to save BRAM resources.
+ */
 module csr_file (clk, write, wrAddr_CSR, wrVal_CSR, rdAddr_CSR, rdVal_CSR);
 	input clk;
 	input write;
@@ -42,13 +49,10 @@ module csr_file (clk, write, wrAddr_CSR, wrVal_CSR, rdAddr_CSR, rdVal_CSR);
 	input [11:0] rdAddr_CSR;
 	output reg[31:0] rdVal_CSR;
 
-	reg [31:0] csr_file [0:2**10-1];
-
-	always @(posedge clk) begin
-		if (write) begin
-			csr_file[wrAddr_CSR] <= wrVal_CSR;
-		end
-		rdVal_CSR <= csr_file[rdAddr_CSR];
+	// CSRs are not implemented to save BRAM. All reads return 0.
+	always @(*) begin
+		rdVal_CSR = 32'b0;
 	end
 
 endmodule
+
