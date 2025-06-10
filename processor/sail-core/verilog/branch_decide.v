@@ -43,17 +43,79 @@
  */
 
 
+module branch_decision(
+	clk,
+	Branch,
+	Predicted,
+	Branch_Enable,
+	Jump,
+	Decision,
+	Mispredict,
+	Branch_Jump_Trigger
+);
 
-module branch_decision (Branch, Predicted, Branch_Enable, Jump, Mispredict, Decision, Branch_Jump_Trigger);
-	input	Branch;
-	input	Predicted;
-	input	Branch_Enable;
-	input	Jump;
-	output	Mispredict;
-	output	Decision;
-	output	Branch_Jump_Trigger;
+	/*
+	 *	inputs
+	 */
+	input        clk;
+	input        Branch;            // actual_branch_decision: 1=taken, 0=not
+	input        Predicted;         // predictor’s “predict taken?” (registered)
+	input        Branch_Enable;     // high when that branch is valid in MEM
+	input        Jump;              // 1 = unconditional jump (optional)
 
-	assign	Branch_Jump_Trigger	= ((!Predicted) & (Branch & Branch_Enable)) | Jump;
-	assign	Decision		= (Branch & Branch_Enable);
-	assign	Mispredict		= (Predicted & (!(Branch & Branch_Enable)));
+	/*
+	 *	outputs
+	 */
+	output reg   Decision;          // latched actual outcome
+	output reg   Mispredict;        // 1 if Predicted ≠ actual
+	output reg   Branch_Jump_Trigger; // 1 = flush+redirect PC
+
+	/*
+	 *	pipeline registers (Stage 1)
+	 */
+	reg          branch_en_r;
+	reg          pred_r;
+	reg          jump_r;
+
+	/*
+	 *	initialize registers
+	 */
+	initial begin
+		branch_en_r         = 1'b0;
+		pred_r              = 1'b0;
+		jump_r              = 1'b0;
+		Decision            = 1'b0;
+		Mispredict          = 1'b0;
+		Branch_Jump_Trigger = 1'b0;
+	end
+
+	/*
+	 *	Stage 1: capture inputs
+	 */
+	always @(posedge clk) begin
+		branch_en_r <= Branch & Branch_Enable;
+		pred_r      <= Predicted;
+		jump_r      <= Jump;
+	end
+
+	/*
+	 *	Stage 2: compute outputs based on Stage 1 registers
+	 */
+	always @(posedge clk) begin
+		// Actual resolved outcome
+		Decision <= branch_en_r;
+
+		// Mispredict if predictor was wrong (either direction)
+		Mispredict <= (pred_r & ~branch_en_r)   // predicted=1, actual=0
+		            | (~pred_r &  branch_en_r); // predicted=0, actual=1
+
+		// Trigger flush+redirect for:
+		//   • unconditional jump (jump_r=1)
+		//   • predicted=0 but actual=1 (NT→T)
+		//   • predicted=1 but actual=0 (T→NT)
+		Branch_Jump_Trigger <= jump_r
+		                     | (~pred_r &  branch_en_r)
+		                     | ( pred_r & ~branch_en_r);
+	end
+
 endmodule

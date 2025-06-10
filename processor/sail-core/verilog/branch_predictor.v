@@ -54,57 +54,114 @@ module branch_predictor(
 	/*
 	 *	inputs
 	 */
-	input		clk;
-	input		actual_branch_decision;
-	input		branch_decode_sig;
-	input		branch_mem_sig;
-	input [31:0]	in_addr;
-	input [31:0]	offset;
+	input			clk;
+	input			actual_branch_decision;
+	input			branch_decode_sig;
+	input			branch_mem_sig;
+	input	[31:0]	in_addr;
+	input	[31:0]	offset;
 
 	/*
 	 *	outputs
 	 */
-	output [31:0]	branch_addr;
-	output		prediction;
+	output	[31:0]	branch_addr;
+	output			prediction;
 
 	/*
-	 *	internal state
+	 *	internal signals
 	 */
-	reg [1:0]	s;
+	// Global history (10 bits)
+	reg	[9:0]	history;
+	// Pipeline register for RAM address
+	reg	[9:0]	read_addr_reg;
+	// Register branch_mem_sig on negedge
+	reg			branch_mem_sig_reg;
 
-	reg		branch_mem_sig_reg;
+	// RAM read data (4 bits wide, we use only [1:0])
+	wire	[3:0]	ram_rdata;
+	// Old 2‐bit counter = ram_rdata[1:0]
+	wire	[1:0]	old_counter = ram_rdata[1:0];
+	// New 2‐bit saturating counter
+	wire	[1:0]	new_counter = actual_branch_decision
+					? ((old_counter == 2'b11) ? 2'b11 : old_counter + 1'b1)
+					: ((old_counter == 2'b00) ? 2'b00 : old_counter - 1'b1);
+
+	// Write‐enable for PHT (registered on negedge)
+	wire			ram_we = branch_mem_sig_reg;
+	// Raw 10‐bit index = PC[11:2]
+	wire	[9:0]	raw_idx = in_addr[11:2];
+	// XOR with global history
+	wire	[9:0]	idx = raw_idx ^ history;
+	// Write data (4 bits, upper bits = 0)
+	wire	[3:0]	ram_wdata = { 2'b00, new_counter };
 
 	/*
-	 *	The `initial` statement below uses Yosys's support for nonzero
-	 *	initial values:
-	 *
-	 *		https://github.com/YosysHQ/yosys/commit/0793f1b196df536975a044a4ce53025c81d00c7f
-	 *
-	 *	Rather than using this simulation construct (`initial`),
-	 *	the design should instead use a reset signal going to
-	 *	modules in the design and to thereby set the values.
+	 *	initialize registers
 	 */
 	initial begin
-		s = 2'b00;
+		history            = 10'b0;
+		read_addr_reg      = 10'b0;
 		branch_mem_sig_reg = 1'b0;
 	end
 
+	/*
+	 *	capture branch_mem_sig on negedge so that on the next posedge,
+	 *  ram_we = 1 and ram_rdata still reflects old contents
+	 */
 	always @(negedge clk) begin
 		branch_mem_sig_reg <= branch_mem_sig;
 	end
 
 	/*
-	 *	Using this microarchitecture, branches can't occur consecutively
-	 *	therefore can use branch_mem_sig as every branch is followed by
-	 *	a bubble, so a 0 to 1 transition
+	 *	pipeline index/decode on posedge, update history on actual branch resolve
 	 */
 	always @(posedge clk) begin
-		if (branch_mem_sig_reg) begin
-			s[1] <= (s[1]&s[0]) | (s[0]&actual_branch_decision) | (s[1]&actual_branch_decision);
-			s[0] <= (s[1]&(!s[0])) | ((!s[0])&actual_branch_decision) | (s[1]&actual_branch_decision);
+		read_addr_reg <= idx;
+		if (branch_mem_sig) begin
+			history <= { history[8:0], actual_branch_decision };
 		end
 	end
 
+	/*
+	 *	outputs
+	 */
 	assign branch_addr = in_addr + offset;
-	assign prediction = s[1] & branch_decode_sig;
+	assign prediction  = ram_rdata[1] & branch_decode_sig;
+
+	/*
+	 *	SB_RAM40_4K primitive: 1 024×4b table, synchronous read/write
+	 *  • WRITE_MODE = 2 → read returns old data, writes new data same cycle
+	 *  • We only use bits [1:0] of each 4‐bit word
+	 *  • All INIT_xx = 0 → counters start at “00” (strongly not‐taken)
+	 */
+	SB_RAM40_4K #(
+		.WRITE_MODE(2),
+		.INIT_0(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_1(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_2(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_3(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_4(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_5(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_6(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_7(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_8(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_9(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_A(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_B(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_C(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_D(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_E(256'h0000_0000_0000_0000_0000_0000_0000_0000),
+		.INIT_F(256'h0000_0000_0000_0000_0000_0000_0000_0000)
+	) gshare_table (
+		.RDATA  (ram_rdata),     // read old 4‐bit word (we use [1:0])
+		.RADDR  (read_addr_reg), // pipelined index
+		.RCLK   (clk),
+		.RE     (1'b1),          // always read
+
+		.WCLK   (clk),
+		.WADDR  (read_addr_reg), // same address as RADDR
+		.WDATA  (ram_wdata),     // {2'b00, new_counter}
+		.WE     (ram_we)         // asserted when branch_mem_sig_reg=1
+	);
+
 endmodule

@@ -39,35 +39,51 @@
 /*
  *	RISC-V CONTROL UNIT
  */
+
+`include "../include/rv32i-defines.v"
+`include "../include/sail-core-defines.v"
+
 module control(
-		opcode,
-		MemtoReg,
-		RegWrite,
-		MemWrite,
-		MemRead,
-		Branch,
-		ALUSrc,
-		Jump,
-		Jalr,
-		Lui,
-		Auipc,
-		Fence,
-		CSRR
-	);
+    opcode, MemtoReg, RegWrite, MemWrite, MemRead, Branch,
+    ALUSrc, Jump, Jalr, Lui, Auipc, Fence, CSRR,
+    DSP_Enable
+);
+	input [6:0]		opcode;
+	output reg		MemtoReg;
+	output reg		RegWrite;
+	output reg		MemWrite;
+	output reg		MemRead;
+	output reg		Branch;
+	output reg		ALUSrc;
+	output reg		Jump;
+	output reg		Jalr;
+	output reg		Lui;
+	output reg		Auipc;
+	output reg		Fence;
+	output reg		CSRR;
+    output reg      DSP_Enable;
 
-	input	[6:0] opcode;
-	output	MemtoReg, RegWrite, MemWrite, MemRead, Branch, ALUSrc, Jump, Jalr, Lui, Auipc, Fence, CSRR;
+	always @(*) begin
+        // --- Default values for all control signals ---
+        MemtoReg = 1'b0; RegWrite = 1'b0; MemWrite = 1'b0;
+        MemRead = 1'b0;  Branch = 1'b0;   ALUSrc = 1'b0;
+        Jump = 1'b0;     Jalr = 1'b0;     Lui = 1'b0;
+        Auipc = 1'b0;    Fence = 1'b0;    CSRR = 1'b0;
+        DSP_Enable = 1'b0;
 
-	assign MemtoReg = (~opcode[5]) & (~opcode[4]) & (~opcode[3]) & (opcode[0]);
-	assign RegWrite = ((~(opcode[4] | opcode[5])) | opcode[2] | opcode[4]) & opcode[0];
-	assign MemWrite = (~opcode[6]) & (opcode[5]) & (~opcode[4]);
-	assign MemRead = (~opcode[5]) & (~opcode[4]) & (~opcode[3]) & (opcode[1]);
-	assign Branch = (opcode[6]) & (~opcode[4]) & (~opcode[2]);
-	assign ALUSrc = ~(opcode[6] | opcode[4]) | (~opcode[5]);
-	assign Jump = (opcode[6]) & (opcode[5]) & (~opcode[4]) & (opcode[2]);
-	assign Jalr = (opcode[6]) & (opcode[5]) & (~opcode[4]) & (~opcode[3]) & (opcode[2]);
-	assign Lui = (~opcode[6]) & (opcode[5]) & (opcode[4]) & (~opcode[3]) & (opcode[2]);
-	assign Auipc = (~opcode[6]) & (~opcode[5]) & (opcode[4]) & (~opcode[3]) & (opcode[2]);
-	assign Fence = (~opcode[5]) & opcode[3] & (opcode[2]);
-	assign CSRR = (opcode[6]) & (opcode[4]);
+		case (opcode)
+			`kRV32I_INSTRUCTION_OPCODE_LUI:		begin Lui = 1'b1; RegWrite = 1'b1; end
+			`kRV32I_INSTRUCTION_OPCODE_AUIPC:	begin Auipc = 1'b1; RegWrite = 1'b1; end
+			`kRV32I_INSTRUCTION_OPCODE_JAL:		begin Jump = 1'b1; RegWrite = 1'b1; end
+			`kRV32I_INSTRUCTION_OPCODE_JALR:	begin Jalr = 1'b1; ALUSrc = 1'b1; RegWrite = 1'b1; end
+			`kRV32I_INSTRUCTION_OPCODE_BRANCH:	Branch = 1'b1;
+			`kRV32I_INSTRUCTION_OPCODE_LOAD:	begin MemRead = 1'b1; ALUSrc = 1'b1; MemtoReg = 1'b1; RegWrite = 1'b1; end
+			`kRV32I_INSTRUCTION_OPCODE_STORE:	begin MemWrite = 1'b1; ALUSrc = 1'b1; end
+			`kRV32I_INSTRUCTION_OPCODE_IMMOP:	begin ALUSrc = 1'b1; RegWrite = 1'b1; end
+			`kRV32I_INSTRUCTION_OPCODE_ALUOP:	RegWrite = 1'b1;
+			`kRV32I_INSTRUCTION_OPCODE_CSRR:	begin CSRR = 1'b1; RegWrite = 1'b1; end
+            `kRV32I_INSTRUCTION_OPCODE_CUSTOM0: begin RegWrite = 1'b1; DSP_Enable = 1'b1; end
+		endcase
+	end
 endmodule
+
