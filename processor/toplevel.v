@@ -13,7 +13,7 @@ module top (
     reg         CLKHF_POWERUP = 1'b1;
 
     SB_HFOSC #(
-        .CLKHF_DIV("0b11")      // divide by 8 → ~12.5 MHz
+        .CLKHF_DIV("0b10")      // divide by 8 → ~12.5 MHz
     ) u_hfosc (
         .CLKHFEN(ENCLKHF),
         .CLKHFPU(CLKHF_POWERUP),
