@@ -6,8 +6,8 @@ GB3_ROOT = /gb3-resources
 TARGET-ARCH	= riscv32-elf
 TARGET		= riscv
 
-PROGRAM		= template
-PROGRAM-SF	= template-sf
+PROGRAM		= Sieve_E
+PROGRAM-SF	= Sieve_E-sf
 INIT		= init
 INIT-SF		= init-sf
 
